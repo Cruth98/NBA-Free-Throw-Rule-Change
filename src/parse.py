@@ -82,12 +82,13 @@ def parse_free_throws(pbp: pd.DataFrame) -> pd.DataFrame:
         "gameId": "GameId",
         "personId": "PersonId",
         "playerName": "PlayerName",
+        "teamId": "TeamId",
         "teamTricode": "TeamTricode",
         "period": "Period",
         "subType": "SubType",
         "description": "Description",
     })
-    cols = ["GameId", "PersonId", "PlayerName", "TeamTricode", "Period", "ClockSeconds",
+    cols = ["GameId", "PersonId", "PlayerName", "TeamId", "TeamTricode", "Period", "ClockSeconds",
             "ShotNum", "TripLen", "IsMade", "IsStandard", "RuleApplies", "SubType", "Description"]
     return out[cols].reset_index(drop=True)
 
