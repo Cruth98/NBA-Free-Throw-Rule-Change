@@ -3,19 +3,21 @@ scrape.py — pull and cache NBA play-by-play for the FT rule analysis.
 
 stats.nba.com throttles hard, so we cache every game to disk and hit the
 API at most once per game, ever. An interrupted run resumes from the cache.
-Free-throw events are EVENTMSGTYPE == 3; the shot text ("Free Throw 1 of 2")
-lives in the description columns and gets parsed downstream in parse.py.
+Free-throw events are actionType == "Free Throw"; the shot number and trip type
+("Free Throw 1 of 2") live in the subType column and get parsed downstream in
+parse.py. (PlayByPlayV2 was retired mid-2025 and now returns empty JSON, so we
+use PlayByPlayV3, which has a different, richer schema.)
 """
 
 from pathlib import Path
 import time
 import pandas as pd
-from nba_api.stats.endpoints import leaguegamelog, playbyplayv2
+from nba_api.stats.endpoints import leaguegamelog, playbyplayv3
 
 RAW_DIR = Path("data/raw/pbp")
 GAME_LIST_PATH = Path("data/raw/game_ids.parquet")
 REQUEST_SLEEP = 0.6      # seconds between real API calls
-API_TIMEOUT = 30         # stats.nba.com hangs without an explicit timeout
+API_TIMEOUT = 60         # stats.nba.com hangs/cold-starts slowly without a generous timeout
 
 
 def get_game_ids(season: str, season_type: str = "Regular Season") -> pd.DataFrame:
@@ -46,7 +48,7 @@ def scrape_game(game_id: str) -> pd.DataFrame:
     if cache.exists():
         return pd.read_parquet(cache)
 
-    pbp = playbyplayv2.PlayByPlayV2(
+    pbp = playbyplayv3.PlayByPlayV3(
         game_id=game_id, timeout=API_TIMEOUT
     ).get_data_frames()[0]
 
@@ -78,4 +80,5 @@ def load_or_scrape(season: str, season_type: str = "Regular Season",
 if __name__ == "__main__":
     df = load_or_scrape("2025-26", max_games=20)   # small validation run
     print(df.shape)
-    print(df["EVENTMSGTYPE"].value_counts())
+    print(df["actionType"].value_counts())
+    print("Free Throw rows:", (df["actionType"] == "Free Throw").sum())

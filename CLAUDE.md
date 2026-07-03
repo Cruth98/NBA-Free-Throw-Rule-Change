@@ -21,13 +21,19 @@ portfolio piece. Scope: 2025-26 NBA regular season.
 
 ## Data Conventions (invariants)
 - Basketball-facing PascalCase column names (FT1Pct, Trips2Shot, NewTotalPts). Never p1/p2.
-- FT events are EVENTMSGTYPE == 3; shot number & trip type parsed from "Free Throw X of Y" text.
+- Source is PlayByPlayV3 (V2 was retired mid-2025, returns empty JSON). FT events are
+  actionType == "Free Throw"; shot number & trip type come from subType ("Free Throw X of Y");
+  make/miss from the "MISS" prefix in description (shotResult is BLANK for FTs — V3 quirk;
+  makes carry a "(X PTS)" suffix, misses a "MISS" prefix); player via personId/playerName.
 - MUST exclude technical FTs, flagrant FTs, and and-1 "1 of 1" shots from the 2/3-shot analysis.
 - Cache scrapes to disk as Parquet; read from cache downstream; hit stats.nba.com at most once/game.
 
 ## Known Pitfalls
 - GAME_ID has leading zeros (e.g. 0022500001) — keep as string. CSV strips them; use Parquet.
 - stats.nba.com throttles — set request timeouts, sleep between real API calls, raise sleep if blocked.
+- stats.nba.com cold-starts slowly — first hit often read-times-out then works. Use a generous
+  timeout (60s) and retry; don't treat a lone timeout as a dead endpoint.
+- Use PlayByPlayV3, NOT V2. V2 endpoints return empty JSON and nba_api raises KeyError('resultSet').
 - VS Code Python auto-activation and Rich shell integration corrupt Git Bash PATH — keep python.terminal.activateEnvironment 
 and shellIntegration.enabled false; activate venv manually
 
@@ -47,3 +53,9 @@ and shellIntegration.enabled false; activate venv manually
 
 ## Backlog — do NOT build unless asked
 G League before/after validation; college 1-and-1 comparison; modern-era (since 1996-97) all-time list.
+
+### scrape.py hardening (before full-season run, not the sample)
+- Season-key the game-list cache: GAME_LIST_PATH is a fixed constant, so get_game_ids()
+  returns the wrong season if called for a second season. Put {season} in the filename.
+- Adaptive backoff/retry on throttle: a 429/timeout currently prints and skips the game
+  (no retry). Add retry-with-backoff before the full ~1,230-game season run ("raise sleep if blocked").
