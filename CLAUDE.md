@@ -2,7 +2,7 @@
 
 ## Project Overview
 Data science project analyzing the NBA's proposed "one free-throw rule" (one shot
-worth 1/2/3 pts, replacing 1/2/3 separate shots; exempt in last 2 min of Q4 and OT).
+worth 1/2/3 pts, replacing 1/2/3 separate shots; standard multi-shot FTs apply in the last 2 min of Q4 and throughout OT.
 Goal: identify which players the rule helps or hurts, for a public sports-analytics
 portfolio piece. Scope: 2025-26 NBA regular season.
 
@@ -28,6 +28,8 @@ portfolio piece. Scope: 2025-26 NBA regular season.
 ## Known Pitfalls
 - GAME_ID has leading zeros (e.g. 0022500001) — keep as string. CSV strips them; use Parquet.
 - stats.nba.com throttles — set request timeouts, sleep between real API calls, raise sleep if blocked.
+- VS Code Python auto-activation and Rich shell integration corrupt Git Bash PATH — keep python.terminal.activateEnvironment 
+and shellIntegration.enabled false; activate venv manually
 
 ## Repo Layout
 - src/scrape.py (pull+cache pbp), src/parse.py (bucket/filter FT events), src/metrics.py (EV cols).
