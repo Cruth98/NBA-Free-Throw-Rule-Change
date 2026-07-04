@@ -20,6 +20,7 @@ Modeling notes (aligned with Conner):
 """
 
 from pathlib import Path
+import sys
 import numpy as np
 import pandas as pd
 
@@ -39,8 +40,9 @@ FINAL_COLS_TAIL = [
 
 
 def _convertible(fact: pd.DataFrame) -> pd.DataFrame:
-    """The rule-convertible FT set: standard 2/3-shot trips outside the clutch window."""
-    keep = fact["IsStandard"] & fact["TripLen"].isin([2, 3]) & fact["RuleApplies"]
+    """The rule-convertible FT set: standard, complete 2/3-shot trips outside the clutch window."""
+    keep = (fact["IsStandard"] & fact["TripLen"].isin([2, 3])
+            & fact["RuleApplies"] & fact["TripComplete"])
     return fact[keep]
 
 
@@ -122,6 +124,10 @@ def aggregate_ev(fact: pd.DataFrame, group_keys, min_trips: int = DEFAULT_MIN_TR
 
 
 if __name__ == "__main__":
+    # Windows console defaults to cp1252, which can't encode names like Dončić/Jokić.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     fact = parse_free_throws(load_pbp())
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     fact.to_parquet(PROCESSED_DIR / "fact_ft.parquet", index=False)

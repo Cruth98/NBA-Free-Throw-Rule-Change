@@ -78,6 +78,17 @@ def parse_free_throws(pbp: pd.DataFrame) -> pd.DataFrame:
     in_ot = ft["period"] >= Q4 + 1
     ft["RuleApplies"] = ~(in_clutch | in_ot)
 
+    # Trip-completeness: a trip is (game, player, period, dead-ball clock, trip length); both
+    # FTs of a trip share a stopped clock, so they group cleanly. A trip is complete only if it
+    # holds every shot 1..TripLen. Injury substitutions (two personIds split one trip) and raw
+    # PBP gaps leave orphan shots that can't be valued — the current-rule EV needs all shots of
+    # a trip — so we flag and later drop them (~0.1% of trips).
+    ft["TripComplete"] = False
+    std = ft["IsStandard"]
+    trip_keys = ["gameId", "personId", "period", "ClockSeconds", "TripLen"]
+    n_present = ft.loc[std].groupby(trip_keys, dropna=False)["ShotNum"].transform("nunique")
+    ft.loc[std, "TripComplete"] = (n_present == ft.loc[std, "TripLen"])
+
     out = ft.rename(columns={
         "gameId": "GameId",
         "personId": "PersonId",
@@ -89,7 +100,8 @@ def parse_free_throws(pbp: pd.DataFrame) -> pd.DataFrame:
         "description": "Description",
     })
     cols = ["GameId", "PersonId", "PlayerName", "TeamId", "TeamTricode", "Period", "ClockSeconds",
-            "ShotNum", "TripLen", "IsMade", "IsStandard", "RuleApplies", "SubType", "Description"]
+            "ShotNum", "TripLen", "IsMade", "IsStandard", "RuleApplies", "TripComplete",
+            "SubType", "Description"]
     return out[cols].reset_index(drop=True)
 
 
@@ -97,9 +109,10 @@ def analysis_set(ft: pd.DataFrame) -> pd.DataFrame:
     """The convertible FT set metrics.py operates on.
 
     Standard 2- and 3-shot trips only, outside the clutch window. Drops and-1 "1 of 1",
-    technicals, flagrants, and last-2:00-Q4 / OT trips.
+    technicals, flagrants, last-2:00-Q4 / OT trips, and positionally incomplete trips.
     """
-    keep = ft["IsStandard"] & ft["TripLen"].isin([2, 3]) & ft["RuleApplies"]
+    keep = (ft["IsStandard"] & ft["TripLen"].isin([2, 3])
+            & ft["RuleApplies"] & ft["TripComplete"])
     return ft[keep].reset_index(drop=True)
 
 
@@ -115,8 +128,11 @@ if __name__ == "__main__":
     tech_flag = (~ft["IsStandard"]).sum()
     and1 = (ft["IsStandard"] & (ft["TripLen"] == 1)).sum()
     clutch = (ft["IsStandard"] & ft["TripLen"].isin([2, 3]) & ~ft["RuleApplies"]).sum()
+    incomplete = (ft["IsStandard"] & ft["TripLen"].isin([2, 3]) & ft["RuleApplies"]
+                  & ~ft["TripComplete"]).sum()
     a = analysis_set(ft)
-    print(f"\nExcluded - technical/flagrant: {tech_flag} | and-1 (1 of 1): {and1} | clutch Q4/OT: {clutch}")
+    print(f"\nExcluded - technical/flagrant: {tech_flag} | and-1 (1 of 1): {and1} | "
+          f"clutch Q4/OT: {clutch} | incomplete trips: {incomplete}")
     print(f"Analysis set: {len(a)} rows")
     print("  TripLen breakdown:", a["TripLen"].value_counts().to_dict())
 
