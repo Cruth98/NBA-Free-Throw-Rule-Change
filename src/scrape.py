@@ -15,15 +15,23 @@ import pandas as pd
 from nba_api.stats.endpoints import leaguegamelog, playbyplayv3
 
 RAW_DIR = Path("data/raw/pbp")
-GAME_LIST_PATH = Path("data/raw/game_ids.parquet")
+GAME_LIST_DIR = Path("data/raw")
 REQUEST_SLEEP = 0.6      # seconds between real API calls
 API_TIMEOUT = 60         # stats.nba.com hangs/cold-starts slowly without a generous timeout
+MAX_RETRIES = 3          # attempts per game before giving up
+BACKOFF_BASE = 2         # seconds; exponential backoff = BACKOFF_BASE * 2**(attempt-1) → 2s, 4s
+
+
+def _game_list_path(season: str) -> Path:
+    """Season-key the game-list cache so seasons don't collide on one filename."""
+    return GAME_LIST_DIR / f"game_ids_{season}.parquet"
 
 
 def get_game_ids(season: str, season_type: str = "Regular Season") -> pd.DataFrame:
-    """Return unique game IDs for a season, cached to disk."""
-    if GAME_LIST_PATH.exists():
-        return pd.read_parquet(GAME_LIST_PATH)
+    """Return unique game IDs for a season, cached to disk (keyed by season)."""
+    cache = _game_list_path(season)
+    if cache.exists():
+        return pd.read_parquet(cache)
 
     log = leaguegamelog.LeagueGameLog(
         season=season,
@@ -37,9 +45,31 @@ def get_game_ids(season: str, season_type: str = "Regular Season") -> pd.DataFra
              .sort_values("GAME_DATE")
              .reset_index(drop=True))
 
-    GAME_LIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    games.to_parquet(GAME_LIST_PATH, index=False)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    games.to_parquet(cache, index=False)
     return games
+
+
+def _fetch_pbp_with_retry(game_id: str) -> pd.DataFrame:
+    """Hit PlayByPlayV3 with exponential backoff on throttle/timeout.
+
+    stats.nba.com cold-starts slowly (first hit often read-times-out then works) and
+    throttles under load (429), so a lone failure is not a dead endpoint. Retry up to
+    MAX_RETRIES times, waiting 2s then 4s, before letting the error propagate.
+    """
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return playbyplayv3.PlayByPlayV3(
+                game_id=game_id, timeout=API_TIMEOUT
+            ).get_data_frames()[0]
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                raise
+            wait = BACKOFF_BASE * (2 ** (attempt - 1))   # 2s, 4s
+            print(f"  retry {attempt}/{MAX_RETRIES} for {game_id} "
+                  f"after {type(e).__name__}: {e}; sleeping {wait}s")
+            time.sleep(wait)
+    raise RuntimeError(f"unreachable: exhausted retries for {game_id}")  # loop returns or raises
 
 
 def scrape_game(game_id: str) -> pd.DataFrame:
@@ -48,9 +78,7 @@ def scrape_game(game_id: str) -> pd.DataFrame:
     if cache.exists():
         return pd.read_parquet(cache)
 
-    pbp = playbyplayv3.PlayByPlayV3(
-        game_id=game_id, timeout=API_TIMEOUT
-    ).get_data_frames()[0]
+    pbp = _fetch_pbp_with_retry(game_id)
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     pbp.to_parquet(cache, index=False)
