@@ -26,6 +26,11 @@ portfolio piece. Scope: 2025-26 NBA regular season.
   at the grain FIRST, then derives rates/EV — so any grain (player/team/home-away) is valid.
 - Nothing imputed or dropped silently: missing trip types stay NaN and contribute 0 to totals;
   low-volume groups get a LowVolume flag (tunable min_trips), not removal.
+- TripComplete invariant: a trip (keyed by game+player+period+dead-ball clock+trip length) must
+  hold every shot 1..TripLen. Positionally incomplete trips (injury subs split across two
+  personIds, raw PBP gaps) can't be valued on the current-rule side and are flagged + excluded
+  (~0.1% of trips) via TripComplete — this is what makes the CurrentTotalPts==ActualCurrentPts
+  assertion hold per grain (shot-1 count, the trip count, then equals every later shot's count).
 
 ## Data Conventions (invariants)
 - Basketball-facing PascalCase column names (FT1Pct, Trips2Shot, NewTotalPts). Never p1/p2.
@@ -33,7 +38,8 @@ portfolio piece. Scope: 2025-26 NBA regular season.
   actionType == "Free Throw"; shot number & trip type come from subType ("Free Throw X of Y");
   make/miss from the "MISS" prefix in description (shotResult is BLANK for FTs — V3 quirk;
   makes carry a "(X PTS)" suffix, misses a "MISS" prefix); player via personId/playerName.
-- MUST exclude technical FTs, flagrant FTs, and and-1 "1 of 1" shots from the 2/3-shot analysis.
+- MUST exclude technical FTs, flagrant FTs, and-1 "1 of 1" shots, and positionally incomplete
+  trips (see TripComplete invariant above) from the 2/3-shot analysis.
 - Cache scrapes to disk as Parquet; read from cache downstream; hit stats.nba.com at most once/game.
 
 ## Known Pitfalls
