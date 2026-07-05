@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from parse import load_pbp, parse_free_throws   # parse.py is in the same dir when run as a script
+from scrape import get_player_shooting          # cached 2PT/3PT FG% pull (one API call)
 
 PROCESSED_DIR = Path("data/processed")
 DEFAULT_MIN_TRIPS = 25   # tunable: below this a group's rates are noisy -> LowVolume flag
@@ -282,6 +283,10 @@ if __name__ == "__main__":
     outcomes = attach_display_name(aggregate_outcomes(fact, ["PersonId", "PlayerName"]), namei)
     # Join the FT split rates from player_ft_metrics so player_outcomes is one-stop.
     outcomes = outcomes.merge(players[["PersonId"] + FT_SPLIT_RATE_COLS], on="PersonId", how="left")
+    # Join 2PT/3PT FG% (one cached API call) for the hack-a-Shaq flip analysis.
+    shooting = get_player_shooting("2025-26")
+    outcomes = outcomes.merge(shooting[["PersonId", "TwoPT_FGPct", "ThreePT_FGPct"]],
+                              on="PersonId", how="left")
     outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
 
     print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")

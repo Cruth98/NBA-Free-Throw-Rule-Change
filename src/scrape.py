@@ -12,7 +12,7 @@ use PlayByPlayV3, which has a different, richer schema.)
 from pathlib import Path
 import time
 import pandas as pd
-from nba_api.stats.endpoints import leaguegamelog, playbyplayv3
+from nba_api.stats.endpoints import leaguegamelog, playbyplayv3, leaguedashplayerstats
 
 RAW_DIR = Path("data/raw/pbp")
 GAME_LIST_DIR = Path("data/raw")
@@ -48,6 +48,46 @@ def get_game_ids(season: str, season_type: str = "Regular Season") -> pd.DataFra
     cache.parent.mkdir(parents=True, exist_ok=True)
     games.to_parquet(cache, index=False)
     return games
+
+
+def get_player_shooting(season: str, season_type: str = "Regular Season") -> pd.DataFrame:
+    """Return PersonId -> 2PT and 3PT FG% for a season, cached to disk (one API call).
+
+    leaguedashplayerstats pulls every player at once (Base measure). The 2PT split is derived
+    (FG2 = FG - FG3) since the endpoint only exposes total and 3PT lines. Players with no 2PT
+    attempts get NaN (undefined rate). Feeds the hack-a-Shaq flip analysis in metrics.py.
+    """
+    cache = GAME_LIST_DIR / f"player_shooting_{season}.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            df = leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season, season_type_all_star=season_type,
+                per_mode_detailed="Totals", measure_type_detailed_defense="Base",
+                timeout=API_TIMEOUT,
+            ).get_data_frames()[0]
+            fg2m = df["FGM"] - df["FG3M"]
+            fg2a = df["FGA"] - df["FG3A"]
+            out = pd.DataFrame({
+                "PersonId": df["PLAYER_ID"].astype(int),
+                "TwoPT_FGM": fg2m.astype(int),
+                "TwoPT_FGA": fg2a.astype(int),
+                "TwoPT_FGPct": fg2m / fg2a.where(fg2a > 0),   # NaN where no 2PT attempts
+                "ThreePT_FGPct": df["FG3_PCT"].astype(float),
+            })
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            out.to_parquet(cache, index=False)
+            return out
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                raise
+            wait = BACKOFF_BASE * (2 ** (attempt - 1))
+            print(f"  retry {attempt}/{MAX_RETRIES} for leaguedashplayerstats "
+                  f"after {type(e).__name__}: {e}; sleeping {wait}s")
+            time.sleep(wait)
+    raise RuntimeError(f"unreachable: exhausted retries for player shooting ({season})")
 
 
 def _fetch_pbp_with_retry(game_id: str) -> pd.DataFrame:
