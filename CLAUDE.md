@@ -31,6 +31,19 @@ portfolio piece. Scope: 2025-26 NBA regular season.
   personIds, raw PBP gaps) can't be valued on the current-rule side and are flagged + excluded
   (~0.1% of trips) via TripComplete — this is what makes the CurrentTotalPts==ActualCurrentPts
   assertion hold per grain (shot-1 count, the trip count, then equals every later shot's count).
+- Observed-vs-rate volume floor (locked): OUTCOME metrics are observed facts summed over trips
+  that actually happened — TrueNet, TotalPtsSalvaged, TotalValueLost/Gained, per-trip
+  NewPts/CurrentPts/ValueLost/ValueGained/TripDelta — and NEVER get a minimum-trip filter; a
+  1-trip player's TrueNet is exactly right. RATE metrics extrapolate from a sample and DO need
+  the min-trip floor (LowVolume) because small samples distort them — FT1Pct/FT2Pct/FT3Pct, the
+  per-trip EVs (CurrentEV/NewEV/DeltaEV), and anything derived from a rate incl. Winpact
+  (= TrueNet/30.5, rate-derived via its EV lineage). Rule of thumb: if the number changes when you
+  add more games of the SAME player, it's a rate (floor it); if it only accumulates, it's an
+  outcome (never floor it). TrueNet == aggregate_ev's DeltaTotalPts by construction (r=1.0),
+  so it inherits the same interpretation while remaining an observed count.
+- Names: V3 playerName is surname-only and collides (multiple Johnsons/Jacksons). Carry
+  playerNameI ("S. Gilgeous-Alexander", already in cached pbp — no API call) as PlayerNameI onto
+  every persisted output; downstream displays use the fullest name available.
 
 ## Data Conventions (invariants)
 - Basketball-facing PascalCase column names (FT1Pct, Trips2Shot, NewTotalPts). Never p1/p2.
