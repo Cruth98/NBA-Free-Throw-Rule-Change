@@ -12,7 +12,8 @@ use PlayByPlayV3, which has a different, richer schema.)
 from pathlib import Path
 import time
 import pandas as pd
-from nba_api.stats.endpoints import leaguegamelog, playbyplayv3, leaguedashplayerstats
+from nba_api.stats.endpoints import (leaguegamelog, playbyplayv3, leaguedashplayerstats,
+                                     leaguedashplayershotlocations)
 
 RAW_DIR = Path("data/raw/pbp")
 GAME_LIST_DIR = Path("data/raw")
@@ -88,6 +89,50 @@ def get_player_shooting(season: str, season_type: str = "Regular Season") -> pd.
                   f"after {type(e).__name__}: {e}; sleeping {wait}s")
             time.sleep(wait)
     raise RuntimeError(f"unreachable: exhausted retries for player shooting ({season})")
+
+
+def get_player_rim_shooting(season: str, season_type: str = "Regular Season") -> pd.DataFrame:
+    """Return PersonId -> Restricted Area (rim) FG% for a season, cached to disk (one API call).
+
+    leaguedashplayershotlocations with distance_range='By Zone' returns FGM/FGA per shot zone
+    for every player at once. The Restricted Area (<4 ft) is the rim proxy — a center's real
+    alternative to being fouled is a dunk/layup, so this is a truer "let them shoot" value than
+    blended 2PT%. Players with no RA attempts get NaN. Columns are a (zone, stat) MultiIndex.
+    """
+    cache = GAME_LIST_DIR / f"player_rim_{season}.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            df = leaguedashplayershotlocations.LeagueDashPlayerShotLocations(
+                season=season, season_type_all_star=season_type,
+                per_mode_detailed="Totals", distance_range="By Zone", timeout=API_TIMEOUT,
+            ).get_data_frames()[0]
+            ra_fgm = df[("Restricted Area", "FGM")]
+            ra_fga = df[("Restricted Area", "FGA")]
+            # Total FGA = sum of the DISJOINT zone FGA. 'Corner 3' is a Left+Right aggregate,
+            # so it must be excluded or corner threes double-count.
+            fga_zones = [c for c in df.columns if c[1] == "FGA" and c[0] != "Corner 3"]
+            total_fga = df[fga_zones].sum(axis=1)
+            out = pd.DataFrame({
+                "PersonId": df[("", "PLAYER_ID")].astype(int),
+                "RimFGM": ra_fgm.astype(int),
+                "RimFGA": ra_fga.astype(int),
+                "RimFGPct": ra_fgm / ra_fga.where(ra_fga > 0),   # NaN where no rim attempts
+                "TotalFGA": total_fga.astype(int),
+            })
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            out.to_parquet(cache, index=False)
+            return out
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                raise
+            wait = BACKOFF_BASE * (2 ** (attempt - 1))
+            print(f"  retry {attempt}/{MAX_RETRIES} for leaguedashplayershotlocations "
+                  f"after {type(e).__name__}: {e}; sleeping {wait}s")
+            time.sleep(wait)
+    raise RuntimeError(f"unreachable: exhausted retries for rim shooting ({season})")
 
 
 def _fetch_pbp_with_retry(game_id: str) -> pd.DataFrame:

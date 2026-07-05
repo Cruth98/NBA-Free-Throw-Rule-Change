@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from parse import load_pbp, parse_free_throws   # parse.py is in the same dir when run as a script
-from scrape import get_player_shooting          # cached 2PT/3PT FG% pull (one API call)
+from scrape import get_player_shooting, get_player_rim_shooting   # cached FG% pulls (API)
 
 PROCESSED_DIR = Path("data/processed")
 DEFAULT_MIN_TRIPS = 25   # tunable: below this a group's rates are noisy -> LowVolume flag
@@ -304,6 +304,20 @@ if __name__ == "__main__":
     cat[valid & (old <= 0) & (new <= 0)] = "NeverHackable"
     cat[~valid] = "Unknown"
     outcomes["HackCategory"] = cat
+
+    # Rim (Restricted Area) variant: a center's real alternative to a foul is a dunk/layup, so
+    # RA FG% is a truer "let them shoot" value than blended 2PT%. Keep both for comparison.
+    rim = get_player_rim_shooting("2025-26")
+    outcomes = outcomes.merge(rim[["PersonId", "RimFGPct", "RimFGA", "TotalFGA"]],
+                              on="PersonId", how="left")
+    outcomes["RimFG_EV"] = 2 * outcomes["RimFGPct"]
+    outcomes["ShaqScore_2FG"] = outcomes["ShaqScore"]                       # 2PT%-based (alias)
+    outcomes["ShaqScore_Rim"] = outcomes["RimFG_EV"] - 2 * outcomes["FT1Pct_2Shots"]
+    # Rim-attempt share gates ShaqScore_Rim to rim-dependent players (a center's alternative to
+    # a foul really is a rim shot); perimeter finishers with high RimFGPct but few rim attempts
+    # are excluded at display time (RimFGA_Share >= 0.40).
+    outcomes["RimFGA_Share"] = outcomes["RimFGA"] / outcomes["TotalFGA"].where(outcomes["TotalFGA"] > 0)
+    outcomes = outcomes.drop(columns=["RimFGA", "TotalFGA"])
     outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
 
     print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")
