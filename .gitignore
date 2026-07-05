@@ -4,3 +4,8 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 .env
+
+# NBA image assets — managed by the standalone headshot fetcher (D:\NBA Assets by
+# default, outside this repo). Never commit binaries if the path is ever set inside a repo.
+NBA Assets/
+PlayerHeadshots/
