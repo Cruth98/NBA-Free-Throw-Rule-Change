@@ -49,8 +49,12 @@ FINAL_COLS_TAIL = [
 OUTCOME_FINAL_TAIL = [
     "Trips2Shot", "Trips3Shot", "TotalTrips",
     "TotalValueLost", "TotalValueGained", "TotalPtsSalvaged",
-    "ActualCurrentPts", "TrueNet", "Winpact",
+    "ActualCurrentPts", "TrueNet", "TrueNetRate", "Winpact",
 ]
+
+# FT split rates joined from aggregate_ev onto player_outcomes (everything in one place).
+FT_SPLIT_RATE_COLS = ["FT1Pct_2Shots", "FT2Pct_2Shots", "FT1Pct_3Shots",
+                      "FT2Pct_3Shots", "FT3Pct_3Shots", "FT1Pct_Blended"]
 
 
 def _convertible(fact: pd.DataFrame) -> pd.DataFrame:
@@ -229,6 +233,8 @@ def aggregate_outcomes(fact: pd.DataFrame, group_keys) -> pd.DataFrame:
     out["TotalPtsSalvaged"] = out["TotalPtsSalvaged"].fillna(0.0)
 
     out["TrueNet"] = out["TotalValueGained"] - out["ActualCurrentPts"]
+    # Per-trip TrueNet (RATE metric): floor by volume only when SORTING by it, never to define it.
+    out["TrueNetRate"] = out["TrueNet"] / out["TotalTrips"].replace(0, np.nan)
     out["Winpact"] = out["TrueNet"] / PTS_PER_WIN
 
     out = out.reset_index()
@@ -274,6 +280,8 @@ if __name__ == "__main__":
     players.to_parquet(PROCESSED_DIR / "player_ft_metrics.parquet", index=False)
 
     outcomes = attach_display_name(aggregate_outcomes(fact, ["PersonId", "PlayerName"]), namei)
+    # Join the FT split rates from player_ft_metrics so player_outcomes is one-stop.
+    outcomes = outcomes.merge(players[["PersonId"] + FT_SPLIT_RATE_COLS], on="PersonId", how="left")
     outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
 
     print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")
