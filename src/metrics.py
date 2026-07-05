@@ -235,34 +235,59 @@ def aggregate_outcomes(fact: pd.DataFrame, group_keys) -> pd.DataFrame:
     return out[group_keys + OUTCOME_FINAL_TAIL].reset_index(drop=True)
 
 
+def player_name_map(pbp: pd.DataFrame) -> pd.Series:
+    """PersonId -> playerNameI ("S. Gilgeous-Alexander") from raw play-by-play.
+
+    V3's playerName is a bare surname that collides across players (multiple Johnsons /
+    Jacksons); playerNameI adds the first initial to disambiguate. It already lives in the
+    cached pbp, so no extra API call is needed. Returned indexed by PersonId (int).
+    """
+    m = pbp.loc[pbp["playerNameI"].notna() & (pbp["playerNameI"].astype(str) != ""),
+                ["personId", "playerNameI"]].drop_duplicates("personId")
+    return m.set_index("personId")["playerNameI"]
+
+
+def attach_display_name(df: pd.DataFrame, namei: pd.Series) -> pd.DataFrame:
+    """Insert a PlayerNameI display column right after PlayerName (falls back to surname)."""
+    df = df.copy()
+    disp = df["PersonId"].map(namei).fillna(df["PlayerName"])
+    df.insert(df.columns.get_loc("PlayerName") + 1, "PlayerNameI", disp)
+    return df
+
+
 if __name__ == "__main__":
     # Windows console defaults to cp1252, which can't encode names like Dončić/Jokić.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    fact = add_trip_outcomes(parse_free_throws(load_pbp()))
+    raw = load_pbp()
+    fact = add_trip_outcomes(parse_free_throws(raw))
+
+    # Disambiguating display name (playerNameI) carried onto every persisted output.
+    namei = player_name_map(raw)
+    fact["PlayerNameI"] = fact["PersonId"].map(namei).fillna(fact["PlayerName"])
+
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     fact.to_parquet(PROCESSED_DIR / "fact_ft.parquet", index=False)
 
-    players = aggregate_ev(fact, ["PersonId", "PlayerName"])
+    players = attach_display_name(aggregate_ev(fact, ["PersonId", "PlayerName"]), namei)
     players.to_parquet(PROCESSED_DIR / "player_ft_metrics.parquet", index=False)
 
-    print(f"fact_ft rows: {len(fact)} | players: {len(players)}")
+    outcomes = attach_display_name(aggregate_outcomes(fact, ["PersonId", "PlayerName"]), namei)
+    outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
+
+    print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")
     print(f"LowVolume players (< {DEFAULT_MIN_TRIPS} trips): {int(players['LowVolume'].sum())} / {len(players)}")
 
     # Cross-check: outcome-based TrueNet must match the rate-based DeltaTotalPts (independent paths).
-    outcomes = aggregate_outcomes(fact, ["PersonId", "PlayerName"])
-    chk = players.merge(outcomes, on=["PersonId", "PlayerName"])
+    chk = players.merge(outcomes[["PersonId", "TrueNet"]], on="PersonId")
     r = chk["TrueNet"].corr(chk["DeltaTotalPts"])
     max_abs_diff = (chk["TrueNet"] - chk["DeltaTotalPts"]).abs().max()
     print(f"corr(TrueNet, DeltaTotalPts) = {r:.6f} | max |diff| = {max_abs_diff:.6g}")
 
-    # In a 20-game sample everyone is low-volume; fall back to the full set so the demo shows rows.
-    sig = players[~players["LowVolume"]]
-    if sig.empty:
-        sig = players
-    cols = ["PlayerName", "Trips2Shot", "FT1Pct_2Shots", "FT2Pct_2Shots", "DeltaEV2", "DeltaTotalPts"]
-    print("\nMost HURT by the rule (lowest DeltaTotalPts):")
-    print(sig.nsmallest(8, "DeltaTotalPts")[cols].to_string(index=False))
-    print("\nMost HELPED by the rule (highest DeltaTotalPts):")
-    print(sig.nlargest(8, "DeltaTotalPts")[cols].to_string(index=False))
+    # Outcome metrics are observed facts -> no volume floor (show all players).
+    print("\nMost HURT by the rule (lowest TrueNet, all players):")
+    ocol = ["PlayerNameI", "Trips2Shot", "Trips3Shot", "TotalPtsSalvaged", "TrueNet"]
+    print(outcomes.nsmallest(8, "TrueNet")[ocol].to_string(index=False))
+    print("\nMost HELPED by the rule (highest TrueNet, all players):")
+    print(outcomes.nlargest(8, "TrueNet")[ocol].to_string(index=False))
