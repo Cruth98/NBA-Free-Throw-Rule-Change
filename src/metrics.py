@@ -262,6 +262,24 @@ def attach_display_name(df: pd.DataFrame, namei: pd.Series) -> pd.DataFrame:
     return df
 
 
+def _hack_category(old_shaq: pd.Series, new_shaq: pd.Series, suffix: str = "") -> pd.Series:
+    """Classify each player by how the rule change moves them across the hack-a-Shaq threshold.
+
+    Old (current FT rule) and new (one-FT rule) ShaqScore signs give four buckets; NoLonger
+    (old target, new safe) can only happen when FT1 > FT2. Computed WITHIN one scope (2FG or
+    Rim) — never mix scopes. suffix tags the scope in the label (e.g. '_Rim'); missing inputs
+    -> 'Unknown'.
+    """
+    cat = pd.Series(pd.NA, index=old_shaq.index, dtype="object")
+    valid = old_shaq.notna() & new_shaq.notna()
+    cat[valid & (old_shaq > 0) & (new_shaq > 0)] = "AlwaysHackable" + suffix
+    cat[valid & (old_shaq <= 0) & (new_shaq > 0)] = "NewlyHackable" + suffix
+    cat[valid & (old_shaq > 0) & (new_shaq <= 0)] = "NoLongerHackable" + suffix
+    cat[valid & (old_shaq <= 0) & (new_shaq <= 0)] = "NeverHackable" + suffix
+    cat[~valid] = "Unknown"
+    return cat
+
+
 if __name__ == "__main__":
     # Windows console defaults to cp1252, which can't encode names like Dončić/Jokić.
     if hasattr(sys.stdout, "reconfigure"):
@@ -290,20 +308,10 @@ if __name__ == "__main__":
     # ShaqScore = 2FG_EV - NewFT_EV = 2*(2PT% - FT1Pct_2Shots): points the defense gains by
     # fouling under the one-FT rule. Positive -> foul them; sort desc for the biggest targets.
     outcomes["ShaqScore"] = 2 * outcomes["TwoPT_FGPct"] - 2 * outcomes["FT1Pct_2Shots"]
-    # OldShaqScore = 2FG_EV - CurrentFT_EV: whether fouling beat a two under the CURRENT rule.
-    outcomes["OldShaqScore"] = (2 * outcomes["TwoPT_FGPct"]
-                                - (outcomes["FT1Pct_2Shots"] + outcomes["FT2Pct_2Shots"]))
-    # Categorize how the rule change moves each player across the hack-a-Shaq threshold.
-    # NoLongerHackable (old target, new safe) can only happen when FT1 > FT2.
-    old, new = outcomes["OldShaqScore"], outcomes["ShaqScore"]
-    cat = pd.Series(pd.NA, index=outcomes.index, dtype="object")
-    valid = old.notna() & new.notna()
-    cat[valid & (old > 0) & (new > 0)] = "AlwaysHackable"
-    cat[valid & (old <= 0) & (new > 0)] = "NewlyHackable"
-    cat[valid & (old > 0) & (new <= 0)] = "NoLongerHackable"
-    cat[valid & (old <= 0) & (new <= 0)] = "NeverHackable"
-    cat[~valid] = "Unknown"
-    outcomes["HackCategory"] = cat
+    # OldShaqScore_2FG = 2FG_EV - CurrentFT_EV: whether fouling beat a two under the CURRENT rule.
+    outcomes["OldShaqScore_2FG"] = (2 * outcomes["TwoPT_FGPct"]
+                                    - (outcomes["FT1Pct_2Shots"] + outcomes["FT2Pct_2Shots"]))
+    outcomes["HackCategory_2FG"] = _hack_category(outcomes["OldShaqScore_2FG"], outcomes["ShaqScore"])
 
     # Rim (Restricted Area) variant: a center's real alternative to a foul is a dunk/layup, so
     # RA FG% is a truer "let them shoot" value than blended 2PT%. Keep both for comparison.
@@ -313,6 +321,10 @@ if __name__ == "__main__":
     outcomes["RimFG_EV"] = 2 * outcomes["RimFGPct"]
     outcomes["ShaqScore_2FG"] = outcomes["ShaqScore"]                       # 2PT%-based (alias)
     outcomes["ShaqScore_Rim"] = outcomes["RimFG_EV"] - 2 * outcomes["FT1Pct_2Shots"]
+    outcomes["OldShaqScore_Rim"] = (2 * outcomes["RimFGPct"]
+                                    - (outcomes["FT1Pct_2Shots"] + outcomes["FT2Pct_2Shots"]))
+    outcomes["HackCategory_Rim"] = _hack_category(outcomes["OldShaqScore_Rim"],
+                                                  outcomes["ShaqScore_Rim"], suffix="_Rim")
     # Rim-attempt share gates ShaqScore_Rim to rim-dependent players (a center's alternative to
     # a foul really is a rim shot); perimeter finishers with high RimFGPct but few rim attempts
     # are excluded at display time (RimFGA_Share >= 0.40).
