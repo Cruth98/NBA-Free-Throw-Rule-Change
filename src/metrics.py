@@ -283,10 +283,13 @@ if __name__ == "__main__":
     outcomes = attach_display_name(aggregate_outcomes(fact, ["PersonId", "PlayerName"]), namei)
     # Join the FT split rates from player_ft_metrics so player_outcomes is one-stop.
     outcomes = outcomes.merge(players[["PersonId"] + FT_SPLIT_RATE_COLS], on="PersonId", how="left")
-    # Join 2PT/3PT FG% (one cached API call) for the hack-a-Shaq flip analysis.
+    # Join 2PT/3PT FG% (one cached API call) for the hack-a-Shaq analysis.
     shooting = get_player_shooting("2025-26")
     outcomes = outcomes.merge(shooting[["PersonId", "TwoPT_FGPct", "ThreePT_FGPct"]],
                               on="PersonId", how="left")
+    # ShaqScore = 2FG_EV - NewFT_EV = 2*(2PT% - FT1Pct_2Shots): points the defense gains by
+    # fouling under the one-FT rule. Positive -> foul them; sort desc for the biggest targets.
+    outcomes["ShaqScore"] = 2 * outcomes["TwoPT_FGPct"] - 2 * outcomes["FT1Pct_2Shots"]
     outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
 
     print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")
