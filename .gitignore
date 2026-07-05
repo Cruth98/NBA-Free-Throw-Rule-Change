@@ -9,3 +9,6 @@ __pycache__/
 # default, outside this repo). Never commit binaries if the path is ever set inside a repo.
 NBA Assets/
 PlayerHeadshots/
+
+# Claude Design export (rendered artifact, not source)
+/Hack-a-Shaq Venn.html
