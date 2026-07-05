@@ -290,6 +290,20 @@ if __name__ == "__main__":
     # ShaqScore = 2FG_EV - NewFT_EV = 2*(2PT% - FT1Pct_2Shots): points the defense gains by
     # fouling under the one-FT rule. Positive -> foul them; sort desc for the biggest targets.
     outcomes["ShaqScore"] = 2 * outcomes["TwoPT_FGPct"] - 2 * outcomes["FT1Pct_2Shots"]
+    # OldShaqScore = 2FG_EV - CurrentFT_EV: whether fouling beat a two under the CURRENT rule.
+    outcomes["OldShaqScore"] = (2 * outcomes["TwoPT_FGPct"]
+                                - (outcomes["FT1Pct_2Shots"] + outcomes["FT2Pct_2Shots"]))
+    # Categorize how the rule change moves each player across the hack-a-Shaq threshold.
+    # NoLongerHackable (old target, new safe) can only happen when FT1 > FT2.
+    old, new = outcomes["OldShaqScore"], outcomes["ShaqScore"]
+    cat = pd.Series(pd.NA, index=outcomes.index, dtype="object")
+    valid = old.notna() & new.notna()
+    cat[valid & (old > 0) & (new > 0)] = "AlwaysHackable"
+    cat[valid & (old <= 0) & (new > 0)] = "NewlyHackable"
+    cat[valid & (old > 0) & (new <= 0)] = "NoLongerHackable"
+    cat[valid & (old <= 0) & (new <= 0)] = "NeverHackable"
+    cat[~valid] = "Unknown"
+    outcomes["HackCategory"] = cat
     outcomes.to_parquet(PROCESSED_DIR / "player_outcomes.parquet", index=False)
 
     print(f"fact_ft rows: {len(fact)} | players: {len(players)} | outcomes: {len(outcomes)}")
