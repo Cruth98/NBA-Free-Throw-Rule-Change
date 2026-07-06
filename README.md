@@ -53,7 +53,3 @@ visuals/       Rendered charts and scorecards (PNG/HTML)
 - **pandas**
 - **nba_api**
 - **matplotlib**
-
-## Read the Full Write-Up
-
-📄 **Substack article:** _[link coming soon]_
